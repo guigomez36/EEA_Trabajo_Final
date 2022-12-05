@@ -1,0 +1,460 @@
+---
+title: "TP Final"
+author: "Guillermo Gomez"
+date: '2022-11-16'
+output:
+  pdf_document: default
+  html_document: default
+editor_options:
+  markdown:
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+options(digits=4)
+rm(list = ls())
+```
+
+cargo librerias
+
+```{r}
+
+library(ggplot2)
+library(dplyr)
+library(corrplot)
+library(MASS) 
+library(reshape2) 
+library(reshape) 
+library(ggstatsplot)
+library(tidyverse)
+library(tidymodels)
+library(rsample)
+library(ggplot2)
+library(GGally)
+library(MASS)
+library(gridExtra)
+library(purrr)
+#install.packages('tseries', dependencies=TRUE)
+library(tseries)
+```
+
+> carga del dataset y exploracion de los datos
+
+Cargamos el dataset
+
+```{r}
+
+GlobalTemperatures<-read.csv("D:\\cosas\\posgrado UBA\\Año1\\Enfoque Estadístico del Aprendizaje\\TP Final\\dataset\\GlobalTemperatures.csv")
+
+attach(GlobalTemperatures)
+
+```
+
+cambio de dt a datetime format
+
+```{r}
+str(GlobalTemperatures)
+```
+
+cambio el formato de la variable dt a datetime con este formato
+"%Y-%m-%d"
+
+```{r}
+GlobalTemperatures[['dt']] <- as.POSIXct(GlobalTemperatures[['dt']],format = "%Y-%m-%d")
+```
+
+
+Borramos los N/A del datset y graficamos la variable objetivo "LandAndOceanAverageTemperature" de todo el rango de datos.
+
+
+```{r}
+
+GlobalTemperatures <- GlobalTemperatures %>% drop_na()
+p <- ggplot(GlobalTemperatures, aes(x=dt, y=LandAndOceanAverageTemperature)) + geom_line(alpha = 0.1, aes(color='red')) +
+    scale_color_manual(values=c('red')) +
+      labs(title = "LandAndOceanAverageTemperature - Evolucion")
+
+p
+
+```
+
+
+Como el anterior grafico no resulta claro, tomamos el promedio anual de la variable objetivo para tener un grafico de tendencia mas claro.
+
+
+
+```{r}
+GlobalTemperatures['year']=format(GlobalTemperatures$dt, format = "%Y")
+temp_avg_year<-GlobalTemperatures %>%
+  group_by(year) %>%
+  summarise_at(vars(LandAndOceanAverageTemperature), list(name = mean))
+
+ggplot(data=temp_avg_year, aes(x=year, y=name, group=1)) +
+  geom_line(color="red") + geom_point(color="red") +
+scale_x_discrete(guide = guide_axis(check.overlap = TRUE))
+
+```
+
+
+Histograma de temperaturas por siglo, la idea es revisar los mismos datos desde otra optica. Se ve que a medida que llegamos al siglo XXI (azul) aunque hay menos muestras las mismas se corren hacia la derecha (el histograma) a valores mayores de temperatura.
+
+
+```{r}
+GlobalTemperatures['year']=format(GlobalTemperatures$dt, format = "%Y")
+GlobalTemperatures['year2']=substr(GlobalTemperatures$year, start = 1, stop = 2)
+
+
+ggp <- ggplot(GlobalTemperatures, aes(GlobalTemperatures$LandAndOceanAverageTemperature, fill = GlobalTemperatures$year2)) +  # Create
+geom_histogram(stat="bin") +
+  labs(x = "Temperatura", y = "Cantidad de muestras") 
+#+ scale_fill_hue(limits = c("Siglo XVIII","Siglo XVIIII","Siglo XX"))
+
+
+ggp
+```
+
+
+Grafico de temperaturas teniendo como eje de absisas los meses del año
+
+
+```{r fig.align="center", echo = FALSE,fig.width = 12}
+GlobalTemperatures['Mes']=format(GlobalTemperatures$dt, format = "%m")
+options(repr.plot.width =9, repr.plot.height =9)
+ggplot(data=GlobalTemperatures, aes(x=Mes, y=LandAndOceanAverageTemperature, group=1)) +
+geom_line(aes(group = year, colour = year),size=1) +  theme(legend.text = element_text(colour="black", size = 7))
+```
+
+
+
+
+
+
+Hacemos un "zoom in" sobre los datos mayores al  año 2000 para poder observar mejor la periodicidad de los datos
+
+```{r}
+GlobalTemperatures2000=GlobalTemperatures[GlobalTemperatures$dt>='2000-01-01',]
+#pais[['fecha']] <- as.POSIXct(pais[['dt']],format = "%Y-%m-%d")
+
+p <- ggplot(GlobalTemperatures2000, aes(x=dt, y=LandAndOceanAverageTemperature)) + geom_line(alpha = 0.1) + geom_line(size=1, aes(color='red')) + labs(title = "LandAndOceanAverageTemperature - Evolucion (Año >= 2000)") +
+  labs(x = "Año", y = "LandAndOceanAverageTemperature") 
+p
+
+```
+
+
+Un grafico polar muestra mejor el incremento de la temperatura desde 2000 en particular
+
+```{r}
+ggplot(GlobalTemperatures2000, aes(x = Mes, y = LandAndOceanAverageTemperature, group = year, color = year)) +
+  geom_line() +
+  coord_polar()  +  theme(legend.text = element_text(colour="black", size = 7))
+```
+
+
+Grafico mensual con datos mayores al 2000.
+
+```{r}
+p <- ggplot(GlobalTemperatures2000, aes(x=Mes, y=LandAndOceanAverageTemperature, group = year, color = year)) + geom_line(alpha = 0.1) + geom_line(size=1) + labs(title = "LandAndOceanAverageTemperature - Evolucion (Año >= 2000)") +
+  labs(x = "Año", y = "LandAndOceanAverageTemperature") 
+p
+
+```
+
+
+
+Las series de tiempo pueden describirse con un modelo aditivo y uno
+multiplicativo segun los siguientes componentes
+
+Yt : Time series value at period t
+
+St : Seasonal component at period t Tt : Trend-cycle component at period
+t Rt : Remainder (or irregular or error) component at period t
+
+Donde $Yt=St + Tt + Rt$
+
+ó alternativamente
+
+$Yt=St * Tt * Rt$
+
+En "R" existe la funcion decompose que nos permite descomponer una
+determinada serie en estos componentes de manera de entender mejor la
+composicion de nuestros datos
+
+```{r}
+#ts() converts a column from a data frame to a simple time series object.
+#start= and end= arguments specify the x-axis scale. (Year and month in this case).
+#frequency=12 tells that we have monthly data
+
+GlobalTemperatures_ts<-ts(GlobalTemperatures$LandAndOceanAverageTemperature,start=c(1850,1), end=c(2015,12), frequency=12)
+decomp<-decompose(GlobalTemperatures_ts)  
+plot(decomp)
+
+```
+
+> Determinacion de si la serie es estacionaria
+
+
+More precisely, if ${y_t}$ is a stationary time series, then for all  "s" , the distribution of
+$(y_t,…,y_{t+s})$ does not depend on  t .↩︎
+
+Kwiatkowski-Phillips-Schmidt-Shin (KPSS) test 
+
+$H_0$ : Proceso estacionario
+
+$H_a$ : Proceso NO estacionario
+
+```{r}
+library(urca)
+GlobalTemperatures_ts %>% ur.kpss() %>% summary()
+
+```
+
+como el p-value >> 0.05 (valor de corte normal) concluimos que la serie es no estacionaria. a continuacion probamos con la diferencia entre muestras.Rechamos $H_0$
+
+
+```{r}
+library(urca)
+diff(GlobalTemperatures_ts) %>% ur.kpss() %>% summary()
+
+```
+
+Como podemos observar el p-value < 0.05 de manera que podemos concluir que existe evidencia estadistica para decir que la diferencia de las muestras es estacionaria. No rechazamos $H_0$
+
+
+
+
+> Non-seasonal ARIMA models
+
+
+Lo primero que hacemos en quedarnos con los datos mas recientes para aplicar el modelo, desde 1960 en este caso.
+
+
+
+```{r}
+GlobalTemperatures1960_ts<-ts(GlobalTemperatures$LandAndOceanAverageTemperature,start=c(1960,1), end=c(2015,12), frequency=12)
+#GlobalTemperatures1960_ts
+h2 <- 60L
+train <- head(GlobalTemperatures1960_ts, round(length(GlobalTemperatures1960_ts) - h2))
+test <- tail(GlobalTemperatures1960_ts, h2)
+#train
+#test
+
+autoplot(train) + autolayer(test) + coord_cartesian(xlim = c(2000,2015))
+
+```
+
+
+Es estacionaria la serie train?
+
+Kwiatkowski-Phillips-Schmidt-Shin (KPSS) test 
+
+$H_0$ : Proceso estacionario
+
+$H_a$ : Proceso NO estacionario
+
+
+```{r}
+#library(urca)
+train %>% ur.kpss() %>% summary()
+
+diff(train) %>% ur.kpss() %>% summary()
+
+```
+
+
+```{r}
+decomp<-decompose(train)
+plot(decomp)
+```
+
+
+```{r}
+decomp<-decompose(diff(train))
+plot(decomp)
+```
+
+
+
+calculamos ACF y PACF sobre el conjunto de train
+
+
+```{r}
+tsdisplay(train)
+```
+
+
+ARIMA( p,d,q ) model
+
+p= 	order of the autoregressive part;
+d=degree of first differencing involved;
+q=order of the moving average part.
+
+Probaremos un modelo ARIMA con los siguientes parametros (3,1,0) sobre los datos sin compensar la estacionalidad ni la tendencia. Solo a modo de prueba y con fines academicos ya que la libreria de R tiene la opcion de hacerlo de manera automatica.
+
+
+
+```{r}
+(fit <- Arima(train, order=c(3,1,0)))
+```
+
+
+Grafico de los residuos del modelo
+
+
+```{r}
+checkresiduals(fit)
+```
+
+
+
+
+Prediccion vs Test de este modelo que denominamos "Modelo Manual"
+
+
+```{r}
+#fit %>% forecast(h=60) %>% autoplot() 
+fit %>%
+  forecast(h=60) %>%
+  autoplot() + autolayer(test)+ coord_cartesian(xlim = c(2000,2015))  +
+      labs(title = "Modelo Manual Prediccion vs Test")
+
+```
+
+
+Se ve que el resultado es bastante pobre ya que no solo la prediccion se aleja de los datos de test sino que el intervalo de confianza es muy amplio, superando el rango de la variable. Es un modelo pobre.
+
+
+A continuacion guardo la prediccion del modelo hecho manualmente y genero uno nuevo con auto.arima de R
+
+
+```{r}
+modelo_0<-fit %>% forecast(h=60)
+fit1 <- auto.arima(train, seasonal=FALSE, stepwise=FALSE, approximation=FALSE)
+modelo_1<-fit1 %>% forecast(h=60)
+```
+
+veo la prediccion de este ultimo vs los valores de test
+
+```{r}
+#fit %>% forecast(h=60) %>% autoplot() 
+fit1 %>%
+  forecast(h=60) %>%
+  autoplot() + autolayer(test) + coord_cartesian(xlim = c(2000,2015))  +
+      labs(title = "Modelo Auto.Arima Prediccion vs Test")
+```
+
+
+calculo el RMSE del modelo armado manualmente contra los datos de test
+
+
+```{r}
+#install.packages('Metrics',dependencies=TRUE)
+library(Metrics)
+rmse(modelo_0$mean,test)
+
+```
+calculo el RMSE del modelo realizado con "Auto.Arima" contra los datos de test
+
+
+```{r}
+rmse(modelo_1$mean,test)
+```
+
+como se puede observar el algoritmo de R es mucho mas eficiente en lograr un modelo optimo.
+
+Lo mismo se puede observa en los graficos que contrastan los valores predichos entre ambos modelos y los datos de test.
+
+```{r}
+
+fit1 %>%
+  forecast(h=60) %>%
+  autoplot() + autolayer(test) + coord_cartesian(xlim = c(2010,2015)) +
+      labs(title = "Modelo Auto.Arima")  + ylim(5,25)   + fit %>%
+  forecast(h=60) %>%
+  autoplot() + autolayer(test) + coord_cartesian(xlim = c(2010,2015)) + labs(title = "Modelo Manual") + ylim(5,25) 
+```
+
+
+
+
+
+>Seasonal ARIMA models
+
+calculo el modelo usando la libreria de R Auto.Arima, indicandole que quiero un modelo que tenga en cuenta la estacionalidad (seasonal=TRUE)
+
+
+```{r}
+fit2 <- auto.arima(train, seasonal=TRUE, stepwise=FALSE, approximation=FALSE)
+modelo_2<-fit2 %>% forecast(h=60)
+```
+
+
+
+veo la prediccion de este ultimo
+
+```{r}
+#fit %>% forecast(h=60) %>% autoplot() 
+fit2 %>%
+  forecast(h=60) %>%
+  autoplot() + autolayer(test) + coord_cartesian(xlim = c(2000,2015))  +
+      labs(title = "Modelo Seasonal Arima Prediccion vs Test")
+```
+
+
+```{r}
+summary(fit1)
+```
+
+```{r}
+summary(fit2)
+```
+
+
+
+calculamos el RMSE de este nuevo modelo
+
+
+```{r}
+rmse(modelo_2$mean,test)
+```
+
+Se puede observar que con este ultimo modelo se logra elvalor mas bajo de RMSE.
+
+```{r}
+modelo<-c('Modelo_Manual', 'Auto.Arima', 'Auto.Arima_Seasonal')
+rmse <-c (rmse(modelo_0$mean,test),rmse(modelo_1$mean,test),rmse(modelo_2$mean,test))
+datos <- data.frame(modelo = modelo, rmse = rmse)
+datos
+```
+
+
+Este resultado numerico puede tambien observarse en los graficos que se muestran a continuacion cuando se comparan los modelos obtenidos.
+
+
+
+
+```{r fig.align="center", echo = FALSE,fig.width = 12}
+fit1 %>%
+  forecast(h=60) %>%
+  autoplot() + autolayer(test) + coord_cartesian(xlim = c(2010,2015)) +
+      labs(title = "Modelo Auto.Arima")  + ylim(5,25)   + fit %>%
+  forecast(h=60) %>%
+  autoplot() + autolayer(test) + coord_cartesian(xlim = c(2010,2015)) + labs(title = "Modelo Manual") + ylim(5,25)  + fit2 %>%
+  forecast(h=60) %>%
+  autoplot() + autolayer(test) + coord_cartesian(xlim = c(2010,2015)) + labs(title = "Modelo Ato.Arima_Seasonal") + ylim(5,25) 
+```
+
+
+
+```{r fig.align="center", echo = FALSE,fig.width = 12}
+fit1 %>%
+  forecast(h=60) %>%
+  autoplot() + autolayer(test) + coord_cartesian(xlim = c(2010,2015)) +
+      labs(title = "Modelo Auto.Arima")  + ylim(10,20)   + fit %>%
+  forecast(h=60) %>%
+  autoplot() + autolayer(test) + coord_cartesian(xlim = c(2010,2015)) + labs(title = "Modelo Manual") + ylim(10,20)  + fit2 %>%
+  forecast(h=60) %>%
+  autoplot() + autolayer(test) + coord_cartesian(xlim = c(2010,2015)) + labs(title = "Modelo Ato.Arima_Seasonal") + ylim(10,20) 
+```
+
