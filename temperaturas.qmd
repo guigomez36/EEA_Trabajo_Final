@@ -1,0 +1,138 @@
+---
+title: "Temperaturas"
+format: html
+editor: visual
+jupyter: ir
+---
+
+# Temperaturas globales
+
+**Importación de las librerias**
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(lubridate)
+library(aTSA)
+library(forecast)
+```
+
+**Cargamos el dataset a analizar**
+
+```{r}
+ds = read.csv('GlobalTemperaturesLimpio.csv')
+
+ds <- ds %>% mutate(dt = as.Date(dt)) %>% filter(dt>'1950/01/01') 
+
+ts <- ts(ds$LandAndOceanAverageTemperature,start=c(1950,1),frequency=12)
+
+plot_season <- ds %>% filter(dt > '2010/01/01')
+dt <- ts(plot_season$LandAndOceanAverageTemperature,start=c(2010,1),frequency=12)
+```
+
+Vemos que forma tiene la serie
+
+```{r}
+autoplot(ts)
+```
+
+Vemos una visualización de la componente de estación del problema
+
+```{r}
+ggseasonplot(dt)
+```
+
+```{r}
+descomposicion <- decompose(ts,type='additive') # esta función descompone automaticamente las componentes de estacion, tendencia y remanente
+```
+
+### DESCOMPOSICIÓN DE LA SERIE TEMPORAL
+
+**Yt = St + Tt + Rt**
+
+```{r}
+yt <- descomposicion$x - descomposicion$seasonal
+```
+
+```{r}
+autoplot(yt)
+```
+
+Podemos ver como a la serie de tiempo le quitamos la estacionalidad que tenía en un principio. En este gráfico solo queda la tendencia y los el remanente de la serie de tiempo. Interesante ver como la pendiente empieza a ser positiva a partir de 1980.
+
+```{r}
+autoplot(yt) +xlim(1980,2015)+geom_smooth(method='lm', formula= y~x)
+```
+
+Cuando le quitamos la tendencia
+
+```{r}
+ytt <- yt - descomposicion$trend
+
+
+```
+
+```{r}
+autoplot(ytt)
+```
+
+```{r}
+autoplot(ytt) +xlim(2000,2015)+geom_smooth(method='lm', formula= y~x)
+```
+
+### GRÁFICOS ACF Y PACF
+
+```{r}
+autocorr <- Acf(ytt, lag.max = 10)
+Pacf(ytt,lag.max = 10)
+```
+
+Linea azul: indica nivel a partir que se pueden considerar diferentes a 0 las correlaciones. En base a esto un modelo con lag de 3 o 5 sería lo primero en explorar.
+
+Teniendo en cuenta lo observado por lo gráficos, el gráfico pacf sugiere un posible modelo de AR(5) y el ACF sugiere un posible modelo MA(5). Por lo que tendremos
+
+ARIMA(5,1,0)
+
+ARIMA(0,1,5)
+
+Antes de explorar el modelo Arima, chequeamos el supuesto de estacionareidad de la serie de tiempo antes de ingresar al modelo arima
+
+```{r}
+adf.test(ytt)
+```
+
+## MODELO ARIMA
+
+Pruebo el primer modelo propuesto
+
+```{r}
+modelo_arima <- Arima(yt,order = c(5,1,0))
+summary(modelo_arima)
+```
+
+Pruebo el segundo modelo propuesto
+
+```{r}
+modelo_arima2 <- Arima(yt,order=c(0,1,5))
+summary(modelo_arima2)
+```
+
+### Automatización para la búsqueda del mejor modelo
+
+```{r}
+modelo <- auto.arima(yt,seasonal = FALSE)
+summary(modelo)
+```
+
+Debo verificar los residuos para comprobar que se cumplan los supuestos del modelo
+
+```{r}
+checkresiduals(modelo)
+```
+
+Es importante mencionar que no verifica que los supuestos de los residuos. Vemos que parece haber correlación entre los residueos y que no está totalmente centrado en 0 la media de estos.
+
+```{r}
+modelo %>% forecast::forecast(h=36) %>%
+  autoplot() + xlim(2000,2020)
+```
